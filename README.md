@@ -35,6 +35,24 @@ can be emailed or hosted anywhere — no server required.
   see counts and drill into one group
 - **Market matrix** — Module × Market heatmap
 
+## Deploy to Streamlit Community Cloud
+
+1. Go to <https://share.streamlit.io> and sign in with the GitHub account
+   that owns this repo.
+2. Click **Create app → Deploy a public app from GitHub**.
+3. Fill in:
+   - **Repository:** `serhatgirgin74-cpu/INEOS---Labels`
+   - **Branch:** `claude/bold-lamport-5w4oa` (or `main` after merging)
+   - **Main file path:** `app.py`
+   - **Python version:** 3.11 (taken from `runtime.txt`)
+4. Click **Deploy**. First build takes ~1–2 min while it installs
+   `requirements.txt`.
+
+The app reads `data/labels.csv` + `data/images/`, both checked into the
+repo, so no extra configuration is needed. Re-running
+`python extract_data.py` after updating the workbook and pushing the
+result will trigger an auto-redeploy.
+
 ## Data extraction note
 
 The workbook uses Excel's *image-in-cell* (rich data) feature. openpyxl does

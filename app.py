@@ -25,7 +25,14 @@ st.set_page_config(page_title="INEOS Label Catalogue", page_icon="🏷️", layo
 
 @st.cache_data
 def load() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "labels.csv").fillna("")
+    csv_path = DATA_DIR / "labels.csv"
+    if not csv_path.exists():
+        st.error(
+            "Catalogue data not found. Run `python extract_data.py` to "
+            "regenerate `data/labels.csv` and `data/images/`."
+        )
+        st.stop()
+    df = pd.read_csv(csv_path).fillna("")
     for c in ["markets", "complexity"]:
         df[c] = df[c].apply(lambda v: ast.literal_eval(v) if isinstance(v, str) and v.startswith("[") else [])
     for c in MARKETS + COMPLEXITY + ['PTO "engineering vehicle"', 'SOP "saleable vehicle"', "Release started (only ECO)"]:
