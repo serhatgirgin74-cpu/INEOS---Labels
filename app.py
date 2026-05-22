@@ -255,4 +255,13 @@ with tab_matrix:
         for m in row["markets"]:
             mat.at[mod, m] += 1
     st.caption("Number of labels per Module × Market")
-    st.dataframe(mat.style.background_gradient(cmap="Blues"), use_container_width=True)
+    max_v = max(int(mat.values.max()), 1)
+
+    def shade(v):
+        if not isinstance(v, (int, float)) or v <= 0:
+            return ""
+        a = 0.15 + 0.75 * (v / max_v)
+        text = "white" if a > 0.55 else "#1a2233"
+        return f"background-color: rgba(11,61,145,{a:.2f}); color: {text};"
+
+    st.dataframe(mat.style.map(shade), use_container_width=True)
