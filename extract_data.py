@@ -7,6 +7,10 @@ Outputs:
     data/labels.csv         - flat catalogue
     data/labels.json        - same data + image filename per row
     data/images/<part>.png  - extracted per-label image
+
+Run ``python build_guide.py`` separately to (re)build the manufacturers'
+guide index (``data/guide_index.json``) and per-page JPEGs
+(``data/guide_pages_jpg/``).
 """
 from __future__ import annotations
 

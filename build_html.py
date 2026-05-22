@@ -14,6 +14,8 @@ import pandas as pd
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data"
 IMG_DIR = DATA_DIR / "images"
+GUIDE_JPG_DIR = DATA_DIR / "guide_pages_jpg"
+GUIDE_INDEX = DATA_DIR / "guide_index.json"
 OUT = ROOT / "dist" / "labels_dashboard.html"
 
 MARKETS = ["PU", "Chassis-Cab", "ROW", "GCC", "Australia", "Canada / Mexico", "US", "EU"]
@@ -29,6 +31,18 @@ def main() -> None:
         if c in df.columns:
             df[c] = df[c].astype(str).isin({"True", "true", "1"})
 
+    guide_idx: dict[str, list[int]] = (
+        json.loads(GUIDE_INDEX.read_text()) if GUIDE_INDEX.exists() else {}
+    )
+
+    # Collect referenced guide pages and embed as JPEG base64
+    referenced_pages = sorted({p for pages in guide_idx.values() for p in pages})
+    guide_b64: dict[int, str] = {}
+    for p in referenced_pages:
+        jpg = GUIDE_JPG_DIR / f"page-{p:02d}.jpg"
+        if jpg.exists():
+            guide_b64[p] = "data:image/jpeg;base64," + base64.b64encode(jpg.read_bytes()).decode("ascii")
+
     records = []
     for _, r in df.iterrows():
         img_data = ""
@@ -36,8 +50,15 @@ def main() -> None:
             p = IMG_DIR / r["image"]
             if p.exists():
                 img_data = "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode("ascii")
+        part = str(r["Part number"])
+        pages = guide_idx.get(part, [])
+        # Fallback image: first guide page if no label image
+        if not img_data and pages:
+            detail = [pg for pg in pages if pg > 7]
+            cand = detail[0] if detail else pages[0]
+            img_data = guide_b64.get(cand, "")
         records.append({
-            "part": str(r["Part number"]),
+            "part": part,
             "name": str(r["ITEM Name"]),
             "module": str(r["MODULE"]),
             "catalogue": str(r["Catalogue number"]),
@@ -51,9 +72,15 @@ def main() -> None:
             "sop": bool(r['SOP "saleable vehicle"']),
             "eco": bool(r["Release started (only ECO)"]),
             "image": img_data,
+            "guide_pages": pages,
         })
 
-    payload = json.dumps({"records": records, "markets": MARKETS, "complexity": COMPLEXITY})
+    payload = json.dumps({
+        "records": records,
+        "markets": MARKETS,
+        "complexity": COMPLEXITY,
+        "guide_pages": guide_b64,
+    })
 
     html = HTML_TEMPLATE.replace("__DATA__", payload)
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -94,21 +121,44 @@ HTML_TEMPLATE = r"""<!doctype html>
   .tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:1rem; }
   .tab { padding:.55rem 1rem; cursor:pointer; border-bottom:2px solid transparent; color:var(--muted); font-weight:500; }
   .tab.active { color:var(--primary); border-bottom-color:var(--primary); }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:1rem; }
-  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; overflow:hidden;
-          display:flex; flex-direction:column; transition:box-shadow .15s; }
-  .card:hover { box-shadow:0 4px 14px rgba(11,61,145,0.10); }
-  .card .img { aspect-ratio:16/9; background:#f7f7f9; display:flex; align-items:center; justify-content:center; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:.55rem; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:8px; overflow:hidden;
+          display:flex; flex-direction:column; transition:box-shadow .15s, transform .15s; cursor:pointer; }
+  .card:hover { box-shadow:0 4px 14px rgba(11,61,145,0.15); transform:translateY(-1px); }
+  .card .img { height:95px; background:#f7f7f9; display:flex; align-items:center; justify-content:center; }
   .card .img img { max-width:100%; max-height:100%; object-fit:contain; }
-  .card .img.empty { color:#bbb; font-size:.85rem; }
-  .card .body { padding:.6rem .8rem; flex:1; display:flex; flex-direction:column; gap:.35rem; }
-  .card .part { font-weight:600; font-size:.92rem; color:var(--primary); }
-  .card .name { font-size:.82rem; color:#333; line-height:1.3; }
-  .chips { display:flex; flex-wrap:wrap; gap:.25rem; margin-top:.3rem; }
-  .chip { background:var(--chip); color:var(--chip-text); border-radius:10px; padding:.1rem .55rem;
-          font-size:.7rem; font-weight:500; }
+  .card .img.empty { color:#bbb; font-size:.75rem; }
+  .card .body { padding:.4rem .55rem .5rem; flex:1; display:flex; flex-direction:column; gap:.2rem; }
+  .card .part { font-weight:600; font-size:.78rem; color:var(--primary); line-height:1.15; }
+  .card .name { font-size:.7rem; color:#444; line-height:1.25;
+                display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .chips { display:flex; flex-wrap:wrap; gap:.15rem; margin-top:.2rem; }
+  .chip { background:var(--chip); color:var(--chip-text); border-radius:8px; padding:.05rem .4rem;
+          font-size:.6rem; font-weight:500; }
   .chip.gray { background:#eef0f4; color:#4a5266; }
-  .meta { font-size:.75rem; color:var(--muted); margin-top:.4rem; }
+  .meta { font-size:.6rem; color:var(--muted); margin-top:.2rem; }
+  .badge { position:absolute; top:6px; right:6px; background:#fff; border:1px solid var(--border);
+           border-radius:50%; width:22px; height:22px; display:flex; align-items:center;
+           justify-content:center; font-size:.65rem; box-shadow:0 1px 2px rgba(0,0,0,0.08); }
+  .card { position:relative; }
+  /* Modal */
+  .modal-bg { position:fixed; inset:0; background:rgba(15,25,50,0.55); display:none;
+              align-items:center; justify-content:center; z-index:100; padding:2vh; }
+  .modal-bg.open { display:flex; }
+  .modal { background:#fff; border-radius:10px; width:min(1100px,96vw); max-height:96vh;
+           display:flex; flex-direction:column; overflow:hidden; }
+  .modal header { background:var(--primary); color:#fff; padding:.7rem 1rem; display:flex;
+                  justify-content:space-between; align-items:center; }
+  .modal header h2 { margin:0; font-size:1.05rem; }
+  .modal .close { background:transparent; border:none; color:#fff; font-size:1.2rem; cursor:pointer; }
+  .modal .tabs-m { display:flex; gap:0; border-bottom:1px solid var(--border); padding:0 1rem;
+                   background:#f5f7fb; }
+  .modal .tab-m { padding:.5rem .9rem; cursor:pointer; border-bottom:2px solid transparent;
+                  color:var(--muted); font-size:.85rem; }
+  .modal .tab-m.active { color:var(--primary); border-bottom-color:var(--primary); background:#fff; }
+  .modal .body-m { padding:.8rem 1rem 1rem; overflow:auto; flex:1; background:#f5f7fb; }
+  .modal .body-m img { max-width:100%; border:1px solid var(--border); border-radius:6px;
+                       background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.05); }
   table { width:100%; border-collapse:collapse; background:#fff; font-size:.85rem; }
   th, td { padding:.45rem .55rem; text-align:left; border-bottom:1px solid var(--border); vertical-align:top; }
   th { background:#f0f3f9; font-weight:600; color:#2c3650; position:sticky; top:0; cursor:pointer; }
@@ -178,6 +228,8 @@ HTML_TEMPLATE = r"""<!doctype html>
     <section id="view-matrix" style="display:none;"></section>
   </main>
 </div>
+
+<div class="modal-bg" id="modal"></div>
 
 <script id="payload" type="application/json">__DATA__</script>
 <script>
@@ -282,8 +334,9 @@ function renderKPIs(rows) {
 function renderGallery(rows) {
   const v = document.getElementById('view-gallery');
   if (!rows.length) { v.innerHTML = '<div class="empty">No labels match the current filters.</div>'; return; }
-  v.innerHTML = '<div class="grid">' + rows.map(r => `
-    <div class="card">
+  v.innerHTML = '<div class="grid">' + rows.map((r, i) => `
+    <div class="card" data-i="${i}" title="Click for installation guide and details">
+      ${r.guide_pages && r.guide_pages.length ? `<div class="badge" title="${r.guide_pages.length} guide page(s)">📖</div>` : ''}
       <div class="img ${r.image ? '' : 'empty'}">
         ${r.image ? `<img src="${r.image}" alt="${r.part}" />` : 'no image'}
       </div>
@@ -292,21 +345,72 @@ function renderGallery(rows) {
         <div class="name">${r.name}</div>
         <div class="chips">
           ${r.markets.map(m => `<span class="chip">${m}</span>`).join('')}
-          ${r.complexity.map(c => `<span class="chip gray">${c}</span>`).join('')}
+          ${r.complexity.slice(0,2).map(c => `<span class="chip gray">${c}</span>`).join('')}
         </div>
-        <details><summary>Details</summary>
-          <div class="det">
-            <b>Module:</b> ${r.module || '—'}<br>
-            <b>Catalogue #:</b> ${r.catalogue || '—'}<br>
-            <b>Quantity/vehicle:</b> ${r.qty || '—'}<br>
-            <b>Prio:</b> ${r.prio || '—'}<br>
-            <b>Drawings:</b> ${r.drawings || '—'}<br>
-            <b>Lifecycle:</b> ${[r.pto?'PTO':null,r.sop?'SOP':null,r.eco?'ECO':null].filter(Boolean).join(', ')||'—'}<br>
-            ${r.notes ? `<b>Notes:</b> ${r.notes}` : ''}
-          </div>
-        </details>
+        <div class="meta">${[r.catalogue && 'Cat '+r.catalogue, r.module].filter(Boolean).join(' · ')}</div>
       </div>
     </div>`).join('') + '</div>';
+  // Bind clicks
+  v.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => openModal(rows[+c.dataset.i])));
+}
+
+function openModal(r) {
+  const bg = document.getElementById('modal');
+  const pages = r.guide_pages || [];
+  const tabs = ['Details', ...pages.map(p => 'Guide p.' + p)];
+  bg.innerHTML = `
+    <div class="modal">
+      <header>
+        <h2>${r.part} — ${r.name}</h2>
+        <button class="close" id="mclose">✕</button>
+      </header>
+      <div class="tabs-m">
+        ${tabs.map((t, i) => `<div class="tab-m ${i===0?'active':''}" data-mt="${i}">${t}</div>`).join('')}
+      </div>
+      <div class="body-m" id="mbody"></div>
+    </div>`;
+  bg.classList.add('open');
+  document.getElementById('mclose').onclick = () => bg.classList.remove('open');
+  bg.onclick = e => { if (e.target === bg) bg.classList.remove('open'); };
+
+  function showMTab(i) {
+    bg.querySelectorAll('.tab-m').forEach((el,j) => el.classList.toggle('active', i===j));
+    const body = document.getElementById('mbody');
+    if (i === 0) {
+      body.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+          <div>
+            <div style="background:#fff;border:1px solid var(--border);border-radius:6px;padding:.5rem;text-align:center;min-height:160px;display:flex;align-items:center;justify-content:center;">
+              ${r.image ? `<img src="${r.image}" style="max-width:100%;max-height:260px;border:none;box-shadow:none;" />` : '<span style="color:#aaa;">no image</span>'}
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid var(--border);border-radius:6px;padding:.7rem 1rem;font-size:.85rem;line-height:1.7;">
+            <div><b>Module:</b> ${r.module || '—'}</div>
+            <div><b>Catalogue #:</b> ${r.catalogue || '—'}</div>
+            <div><b>Quantity/vehicle:</b> ${r.qty || '—'}</div>
+            <div><b>Prio:</b> ${r.prio || '—'}</div>
+            <div><b>Drawings check:</b> ${r.drawings || '—'}</div>
+            <div><b>Lifecycle:</b> ${[r.pto?'PTO':null,r.sop?'SOP':null,r.eco?'ECO':null].filter(Boolean).join(', ')||'—'}</div>
+            <div><b>Markets:</b> ${r.markets.join(', ') || '—'}</div>
+            <div><b>Complexity:</b> ${r.complexity.join(', ') || '—'}</div>
+            ${r.notes ? `<div style="margin-top:.4rem;"><b>Notes:</b> ${r.notes}</div>` : ''}
+            <div style="margin-top:.6rem;color:var(--muted);font-size:.78rem;">
+              ${pages.length ? `📖 ${pages.length} installation-guide page(s) — see tabs above.`
+                             : '📖 No installation-guide page found for this label.'}
+            </div>
+          </div>
+        </div>`;
+    } else {
+      const p = pages[i-1];
+      const src = DATA.guide_pages[p];
+      body.innerHTML = src
+        ? `<div style="text-align:center;color:var(--muted);font-size:.78rem;margin-bottom:.4rem;">Manufacturers' guide — page ${p}</div>
+           <div style="text-align:center;"><img src="${src}" /></div>`
+        : `<div style="text-align:center;color:#aaa;">Page ${p} not available.</div>`;
+    }
+  }
+  bg.querySelectorAll('.tab-m').forEach(el => el.addEventListener('click', () => showMTab(+el.dataset.mt)));
+  showMTab(0);
 }
 
 function renderTable(rows) {
